@@ -8,13 +8,17 @@ function(cu_add_library LIBRARY_NAME)
         "${oneValueArgs}" # one value arguments
         "${multiValueArgs}") # multi value arguments
     
+
+    string(REGEX REPLACE "^${cu_NAMESPACE}_" #matches at beginning of input
+        "" BASE_NAME ${LIBRARY_NAME})
+ 
+    source_group(${cu_NAMESPACE}\\${BASE_NAME} FILES ${cu_PUBLIC_HEADERS})
+    source_group(src FILES ${cu_SRCS})
+    
     add_library(${LIBRARY_NAME}
         ${cu_PUBLIC_HEADERS}
         ${cu_SRCS})
-    
-    string(REGEX REPLACE "^${cu_NAMESPACE}_" #matches at beginning of input
-       "" BASE_NAME ${LIBRARY_NAME})
-    
+        
     message(STATUS "Adding alias library: ${cu_NAMESPACE}::${BASE_NAME}")    
     
     add_library(${cu_NAMESPACE}::${BASE_NAME} ALIAS ${LIBRARY_NAME})
@@ -22,6 +26,7 @@ function(cu_add_library LIBRARY_NAME)
     target_include_directories(${LIBRARY_NAME} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/gen>
         $<INSTALL_INTERFACE:include/${cu_NAMESPACE}/${BASE_NAME}>)
     
     target_link_libraries(${LIBRARY_NAME} PUBLIC ${cu_PUBLIC_DEPS}
@@ -37,6 +42,7 @@ function(cu_add_library LIBRARY_NAME)
         EXPORT_NAME ${BASE_NAME})
 
     if (cu_FOLDER)
+        message(STATUS "Setting folder to ${cu_FOLDER}")
         set_target_properties(${LIBRARY_NAME} PROPERTIES FOLDER ${cu_FOLDER})
     endif()
     if (BUILD_SHARED_LIBS)
