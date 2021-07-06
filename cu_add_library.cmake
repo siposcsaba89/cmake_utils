@@ -12,8 +12,10 @@ function(cu_add_library LIBRARY_NAME)
     string(REGEX REPLACE "^${cu_NAMESPACE}_" #matches at beginning of input
         "" BASE_NAME ${LIBRARY_NAME})
  
-    source_group(${cu_NAMESPACE}\\${BASE_NAME} FILES ${cu_PUBLIC_HEADERS})
-    source_group(src FILES ${cu_SRCS})
+#    source_group(${cu_NAMESPACE}\\${BASE_NAME} FILES ${cu_PUBLIC_HEADERS})
+#    source_group(src FILES ${cu_SRCS})
+    source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/include FILES ${cu_PUBLIC_HEADERS})
+    source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${cu_SRCS})
     
     add_library(${LIBRARY_NAME}
         ${cu_PUBLIC_HEADERS}
