@@ -35,7 +35,6 @@ function(cu_add_library LIBRARY_NAME)
         PRIVATE ${cu_PRIVATE_DEPS})
     set_target_properties(${LIBRARY_NAME} PROPERTIES 
         CXX_STANDARD 17
-        CUDA_STANDARD 14
         CXX_STANDARD_REQUIRED TRUE
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELWITHDEBINFO RELEASE MINSIZEREL
         MAP_IMPORTED_CONFIG_MINSIZEREL MINSIZEREL RELEASE RELWITHDEBINFO
@@ -43,6 +42,9 @@ function(cu_add_library LIBRARY_NAME)
         RELWITHDEBINFO_POSTFIX _rd
         MINSIZEREL_POSTFIX _mr
         EXPORT_NAME ${BASE_NAME})
+    if (NOT MSVC)
+        set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 14)
+    endif()
 
     if (cu_FOLDER)
         message(STATUS "Setting folder to ${cu_FOLDER}")
