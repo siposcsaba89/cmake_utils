@@ -73,7 +73,7 @@ function(cu_add_library LIBRARY_NAME)
 
     include(CMakePackageConfigHelpers)
     write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/gen/${PROJECT_NAME}-config-version.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/gen/${LIBRARY_NAME}-config-version.cmake"
         VERSION ${CMAKE_PROJECT_VERSION}
         COMPATIBILITY SameMajorVersion
     )
