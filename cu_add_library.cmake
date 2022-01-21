@@ -1,7 +1,17 @@
 function(cu_add_library LIBRARY_NAME)
-    set(options OPTIONAL)
+    set(options OPTIONAL SHARED STATIC)
     set(oneValueArgs RENAME FOLDER NAMESPACE)
-    set(multiValueArgs PUBLIC_HEADERS SRCS PUBLIC_DEPS PRIVATE_DEPS PUBLIC_DEFS PRIVATE_DEFS PUBLIC_COMPILE_OPTIONS PRIVATE_COMPILE_OPTIONS)
+    set(multiValueArgs
+        PUBLIC_HEADERS 
+            SRCS
+            PUBLIC_DEPS
+            PRIVATE_DEPS
+            PUBLIC_DEFS
+            PRIVATE_DEFS
+            PUBLIC_COMPILE_OPTIONS
+            PRIVATE_COMPILE_OPTIONS
+            RPATH
+    )
     cmake_parse_arguments(PARSE_ARGV 1
         "cu" #prefix
         "${options}" #options
@@ -11,13 +21,29 @@ function(cu_add_library LIBRARY_NAME)
 
     string(REGEX REPLACE "^${cu_NAMESPACE}_" #matches at beginning of input
         "" BASE_NAME ${LIBRARY_NAME})
- 
+    set(NAMESPACE_DIR ${cu_NAMESPACE})
+    if (NOT cu_NAMESPACE)
+        set(NAMESPACE_DIR ".")
+        set(cu_NAMESPACE ${LIBRARY_NAME})
+    else(${cu_NAMESPACE} STREQUAL ${LIBRARY_NAME})
+        set(NAMESPACE_DIR ".")
+    endif()
 #    source_group(${cu_NAMESPACE}\\${BASE_NAME} FILES ${cu_PUBLIC_HEADERS})
 #    source_group(src FILES ${cu_SRCS})
     source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/include FILES ${cu_PUBLIC_HEADERS})
     source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${cu_SRCS})
-    
-    add_library(${LIBRARY_NAME}
+    set(LIBRARY_TYPE)
+    if(cu_SHARED)
+        message(STATUS "Building shared library!")
+        set(LIBRARY_TYPE SHARED)
+    endif()
+    if(cu_STATIC)
+        message(STATUS "Building static library!")
+        set(LIBRARY_TYPE STATIC)
+    endif()
+
+
+    add_library(${LIBRARY_NAME} ${LIBRARY_TYPE}
         ${cu_PUBLIC_HEADERS}
         ${cu_SRCS})
         
@@ -29,7 +55,7 @@ function(cu_add_library LIBRARY_NAME)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/gen>
-        $<INSTALL_INTERFACE:include/${cu_NAMESPACE}/${BASE_NAME}>)
+        $<INSTALL_INTERFACE:include/${NAMESPACE_DIR}/${BASE_NAME}>)
     
     target_link_libraries(${LIBRARY_NAME} PUBLIC ${cu_PUBLIC_DEPS}
         PRIVATE ${cu_PRIVATE_DEPS})
@@ -41,7 +67,11 @@ function(cu_add_library LIBRARY_NAME)
         DEBUG_POSTFIX _d
         RELWITHDEBINFO_POSTFIX _rd
         MINSIZEREL_POSTFIX _mr
-        EXPORT_NAME ${BASE_NAME})
+        EXPORT_NAME ${BASE_NAME}
+        # rpath settings
+        BUILD_RPATH_USE_ORIGIN TRUE
+        INSTALL_RPATH "\$ORIGIN;libs;lib;bin;modules;../libs;../lib;${cu_RPATH}"
+        )
     if (NOT MSVC)
         set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 14)
     endif()
@@ -50,7 +80,7 @@ function(cu_add_library LIBRARY_NAME)
         message(STATUS "Setting folder to ${cu_FOLDER}")
         set_target_properties(${LIBRARY_NAME} PROPERTIES FOLDER ${cu_FOLDER})
     endif()
-    if (BUILD_SHARED_LIBS)
+    if (BUILD_SHARED_LIBS OR cu_SHARED)
         set_target_properties(${LIBRARY_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
         set_target_properties(${LIBRARY_NAME} PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
     endif()
@@ -79,7 +109,7 @@ function(cu_add_library LIBRARY_NAME)
     )
     include(GenerateExportHeader)
     generate_export_header(${LIBRARY_NAME}
-        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/gen/${cu_NAMESPACE}/${BASE_NAME}/${LIBRARY_NAME}_export.h)
+        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h)
     
     
     configure_file(cmake/config.cmake.in ${LIBRARY_NAME}-config.cmake @ONLY)
@@ -100,6 +130,6 @@ function(cu_add_library LIBRARY_NAME)
             include/
         DESTINATION include/${cu_NAMESPACE}/${BASE_NAME})
     install(FILES
-            ${CMAKE_CURRENT_BINARY_DIR}/gen/${cu_NAMESPACE}/${BASE_NAME}/${LIBRARY_NAME}_export.h
-        DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${cu_NAMESPACE}/${BASE_NAME})
+            ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h
+        DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${NAMESPACE_DIR}/${BASE_NAME})
 endfunction()
