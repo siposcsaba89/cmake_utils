@@ -1,5 +1,5 @@
 function(cu_add_library LIBRARY_NAME)
-    set(options OPTIONAL SHARED STATIC)
+    set(options OPTIONAL SHARED STATIC INTERFACE)
     set(oneValueArgs RENAME FOLDER NAMESPACE)
     set(multiValueArgs
         PUBLIC_HEADERS 
@@ -33,6 +33,8 @@ function(cu_add_library LIBRARY_NAME)
     source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/include FILES ${cu_PUBLIC_HEADERS})
     source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${cu_SRCS})
     set(LIBRARY_TYPE)
+    set(LINK_INTERFACE_PUBLIC PUBLIC)
+    set(LINK_INTERFACE_PRIVATE PRIVATE)
     if(cu_SHARED)
         message(STATUS "Building shared library!")
         set(LIBRARY_TYPE SHARED)
@@ -40,6 +42,12 @@ function(cu_add_library LIBRARY_NAME)
     if(cu_STATIC)
         message(STATUS "Building static library!")
         set(LIBRARY_TYPE STATIC)
+    endif()
+    if(cu_INTERFACE)
+        message(STATUS "Building Header only library!")
+        set(LIBRARY_TYPE INTERFACE)
+        set(LINK_INTERFACE_PUBLIC INTERFACE)
+        set(LINK_INTERFACE_PRIVATE INTERFACE)    
     endif()
 
 
@@ -51,14 +59,19 @@ function(cu_add_library LIBRARY_NAME)
     
     add_library(${cu_NAMESPACE}::${BASE_NAME} ALIAS ${LIBRARY_NAME})
     
-    target_include_directories(${LIBRARY_NAME} PUBLIC
+    target_include_directories(${LIBRARY_NAME} ${LINK_INTERFACE_PUBLIC}
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/gen>
         $<INSTALL_INTERFACE:include/${NAMESPACE_DIR}/${BASE_NAME}>)
+
+    target_link_libraries(${LIBRARY_NAME}
+        ${LINK_INTERFACE_PUBLIC}
+            ${cu_PUBLIC_DEPS}
+        ${LINK_INTERFACE_PRIVATE}
+            ${cu_PRIVATE_DEPS}
+    )
     
-    target_link_libraries(${LIBRARY_NAME} PUBLIC ${cu_PUBLIC_DEPS}
-        PRIVATE ${cu_PRIVATE_DEPS})
     set_target_properties(${LIBRARY_NAME} PROPERTIES 
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED TRUE
@@ -71,6 +84,7 @@ function(cu_add_library LIBRARY_NAME)
         # rpath settings
         BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "\$ORIGIN;libs;lib;bin;modules;../libs;../lib;${cu_RPATH}"
+        VERSION ${CMAKE_PROJECT_VERSION}
         )
     if (NOT MSVC)
         set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 14)
@@ -86,19 +100,23 @@ function(cu_add_library LIBRARY_NAME)
     endif()
 
     if (cu_PUBLIC_DEFS)
-        target_compile_definitions(${LIBRARY_NAME} PUBLIC ${cu_PUBLIC_DEFS})
+        target_compile_definitions(${LIBRARY_NAME} ${LINK_INTERFACE_PUBLIC} ${cu_PUBLIC_DEFS})
     endif()
 
     if (cu_PRIVATE_DEFS)
-        target_compile_definitions(${LIBRARY_NAME} PRIVATE ${cu_PRIVATE_DEFS})
+        target_compile_definitions(${LIBRARY_NAME} ${LINK_INTERFACE_PRIVATE} ${cu_PRIVATE_DEFS})
     endif()
-    
+    if (NOT cu_INTERFACE)
+        target_compile_options(${LIBRARY_NAME} PRIVATE
+            $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/MP>
+        )
+    endif()
     if (cu_PRIVATE_COMPILE_OPTIONS)
-        target_compile_options(${LIBRARY_NAME} PRIVATE ${cu_PRIVATE_COMPILE_OPTIONS})
+        target_compile_options(${LIBRARY_NAME} ${LINK_INTERFACE_PRIVATE} ${cu_PRIVATE_COMPILE_OPTIONS})
     endif()
 
     if (cu_PUBLIC_COMPILE_OPTIONS)
-        target_compile_options(${LIBRARY_NAME} PUBLIC ${cu_PUBLIC_COMPILE_OPTIONS})
+        target_compile_options(${LIBRARY_NAME} ${LINK_INTERFACE_PUBLIC} ${cu_PUBLIC_COMPILE_OPTIONS})
     endif()
 
     include(CMakePackageConfigHelpers)
@@ -107,11 +125,7 @@ function(cu_add_library LIBRARY_NAME)
         VERSION ${CMAKE_PROJECT_VERSION}
         COMPATIBILITY SameMajorVersion
     )
-    include(GenerateExportHeader)
-    generate_export_header(${LIBRARY_NAME}
-        EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h)
-    
-    
+    include(GenerateExportHeader)    
     configure_file(cmake/config.cmake.in ${LIBRARY_NAME}-config.cmake @ONLY)
     include(GNUInstallDirs)
     install(TARGETS ${LIBRARY_NAME} EXPORT ${LIBRARY_NAME}-targets  
@@ -122,14 +136,19 @@ function(cu_add_library LIBRARY_NAME)
             ${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}-config.cmake 
             ${CMAKE_CURRENT_BINARY_DIR}/gen/${LIBRARY_NAME}-config-version.cmake
         DESTINATION 
-            lib/cmake/${LIBRARY_NAME})
+            share/${LIBRARY_NAME})
         
-    install(EXPORT ${LIBRARY_NAME}-targets NAMESPACE ${cu_NAMESPACE}:: DESTINATION lib/cmake/${LIBRARY_NAME})
+    install(EXPORT ${LIBRARY_NAME}-targets NAMESPACE ${cu_NAMESPACE}:: DESTINATION share/${LIBRARY_NAME})
     
     install(DIRECTORY
             include/
         DESTINATION include/${cu_NAMESPACE}/${BASE_NAME})
-    install(FILES
+    if (NOT cu_INTERFACE)
+        generate_export_header(${LIBRARY_NAME}
+            EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h)
+
+        install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h
-        DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${NAMESPACE_DIR}/${BASE_NAME})
+            DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${NAMESPACE_DIR}/${BASE_NAME})
+    endif()
 endfunction()
