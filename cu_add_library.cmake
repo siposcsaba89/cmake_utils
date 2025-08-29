@@ -1,4 +1,4 @@
-function(cu_add_library LIBRARY_NAME)
+macro(cu_add_library LIBRARY_NAME)
     set(options OPTIONAL SHARED STATIC INTERFACE)
     set(oneValueArgs RENAME FOLDER NAMESPACE)
     set(multiValueArgs
@@ -11,12 +11,16 @@ function(cu_add_library LIBRARY_NAME)
             PUBLIC_COMPILE_OPTIONS
             PRIVATE_COMPILE_OPTIONS
             RPATH
+            THIRDPARTY_PUBLIC_DEPS
+            THIRDPARTY_PRIVATE_DEPS
     )
-    cmake_parse_arguments(PARSE_ARGV 1
-        "cu" #prefix
+    cmake_parse_arguments(
+        cu #prefix
         "${options}" #options
         "${oneValueArgs}" # one value arguments
-        "${multiValueArgs}") # multi value arguments
+        "${multiValueArgs}" # multi value arguments
+        ${ARGN}
+    )
     
 
     string(REGEX REPLACE "^${cu_NAMESPACE}_" #matches at beginning of input
@@ -54,10 +58,98 @@ function(cu_add_library LIBRARY_NAME)
     add_library(${LIBRARY_NAME} ${LIBRARY_TYPE}
         ${cu_PUBLIC_HEADERS}
         ${cu_SRCS})
-        
+
     message(STATUS "Adding alias library: ${cu_NAMESPACE}::${BASE_NAME}")    
-    
     add_library(${cu_NAMESPACE}::${BASE_NAME} ALIAS ${LIBRARY_NAME})
+
+    # Robustly handle third-party public dependencies from macro arguments
+    set(_thirdparty_public_targets)
+    set(_current_package "")
+    set(_current_targets "")
+    foreach(_arg IN LISTS cu_THIRDPARTY_PUBLIC_DEPS)
+        string(FIND "${_arg}" ":" _colon_idx)
+        if(_colon_idx GREATER -1)
+            # New package:target(s) entry
+            if(NOT _current_package STREQUAL "")
+                # Process previous package and its targets
+                message(STATUS "Finding package: ${_current_package} for all listed targets")
+                find_package(${_current_package} REQUIRED)
+                string(REPLACE ";" ";" _targets "${_current_targets}")
+                foreach(_target IN LISTS _targets)
+                    message(STATUS "Processing third-party dependency: package='${_current_package}', target='${_target}'")
+                    if(TARGET ${_target})
+                        list(APPEND _thirdparty_public_targets ${_target})
+                    else()
+                        message(WARNING "Target ${_target} from package ${_current_package} not found!")
+                    endif()
+                endforeach()
+            endif()
+            string(SUBSTRING "${_arg}" 0 ${_colon_idx} _current_package)
+            math(EXPR _targets_start "${_colon_idx} + 1")
+            string(SUBSTRING "${_arg}" ${_targets_start} -1 _current_targets)
+        else()
+            # Additional target for previous package
+            if(NOT _current_package STREQUAL "")
+                set(_current_targets "${_current_targets};${_arg}")
+            endif()
+        endif()
+    endforeach()
+    if(NOT _current_package STREQUAL "")
+        message(STATUS "Finding package: ${_current_package} for all listed targets")
+        find_package(${_current_package} REQUIRED)
+        string(REPLACE ";" ";" _targets "${_current_targets}")
+        foreach(_target IN LISTS _targets)
+            message(STATUS "Processing third-party dependency: package='${_current_package}', target='${_target}'")
+            if(TARGET ${_target})
+                list(APPEND _thirdparty_public_targets ${_target})
+            else()
+                message(WARNING "Target ${_target} from package ${_current_package} not found!")
+            endif()
+        endforeach()
+    endif()
+
+    # Robustly handle third-party private dependencies from macro arguments
+    set(_thirdparty_private_targets)
+    set(_current_package "")
+    set(_current_targets "")
+    foreach(_arg IN LISTS cu_THIRDPARTY_PRIVATE_DEPS)
+        string(FIND "${_arg}" ":" _colon_idx)
+        if(_colon_idx GREATER -1)
+            if(NOT _current_package STREQUAL "")
+                message(STATUS "Finding package: ${_current_package} for all listed targets")
+                find_package(${_current_package} REQUIRED)
+                string(REPLACE ";" ";" _targets "${_current_targets}")
+                foreach(_target IN LISTS _targets)
+                    message(STATUS "Processing third-party dependency: package='${_current_package}', target='${_target}'")
+                    if(TARGET ${_target})
+                        list(APPEND _thirdparty_private_targets ${_target})
+                    else()
+                        message(WARNING "Target ${_target} from package ${_current_package} not found!")
+                    endif()
+                endforeach()
+            endif()
+            string(SUBSTRING "${_arg}" 0 ${_colon_idx} _current_package)
+            math(EXPR _targets_start "${_colon_idx} + 1")
+            string(SUBSTRING "${_arg}" ${_targets_start} -1 _current_targets)
+        else()
+            if(NOT _current_package STREQUAL "")
+                set(_current_targets "${_current_targets};${_arg}")
+            endif()
+        endif()
+    endforeach()
+    if(NOT _current_package STREQUAL "")
+        message(STATUS "Finding package: ${_current_package} for all listed targets")
+        find_package(${_current_package} REQUIRED)
+        string(REPLACE ";" ";" _targets "${_current_targets}")
+        foreach(_target IN LISTS _targets)
+            message(STATUS "Processing third-party dependency: package='${_current_package}', target='${_target}'")
+            if(TARGET ${_target})
+                list(APPEND _thirdparty_private_targets ${_target})
+            else()
+                message(WARNING "Target ${_target} from package ${_current_package} not found!")
+            endif()
+        endforeach()
+    endif()
     
     target_include_directories(${LIBRARY_NAME} ${LINK_INTERFACE_PUBLIC}
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -68,12 +160,18 @@ function(cu_add_library LIBRARY_NAME)
     target_link_libraries(${LIBRARY_NAME}
         ${LINK_INTERFACE_PUBLIC}
             ${cu_PUBLIC_DEPS}
+            ${_thirdparty_public_targets}
         ${LINK_INTERFACE_PRIVATE}
             ${cu_PRIVATE_DEPS}
+            ${_thirdparty_private_targets}
     )
-    
+    # on msvc add _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
+    target_compile_definitions(${LIBRARY_NAME} PRIVATE
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
+    )
+
     set_target_properties(${LIBRARY_NAME} PROPERTIES 
-        CXX_STANDARD 17
+        CXX_STANDARD 20
         CXX_STANDARD_REQUIRED TRUE
         MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELWITHDEBINFO RELEASE MINSIZEREL
         MAP_IMPORTED_CONFIG_MINSIZEREL MINSIZEREL RELEASE RELWITHDEBINFO
@@ -87,7 +185,7 @@ function(cu_add_library LIBRARY_NAME)
         VERSION ${CMAKE_PROJECT_VERSION}
         )
     if (NOT MSVC)
-        set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 14)
+        set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 20)
     endif()
 
     if (cu_FOLDER)
@@ -151,4 +249,4 @@ function(cu_add_library LIBRARY_NAME)
             ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h
             DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${NAMESPACE_DIR}/${BASE_NAME})
     endif()
-endfunction()
+endmacro()
