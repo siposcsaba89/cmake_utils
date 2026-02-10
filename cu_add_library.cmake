@@ -73,7 +73,9 @@ function(cu__collect_thirdparty_targets IN_LIST_VAR OUT_LIST_VAR)
         endif()
 
         # Resolve the package first
-        find_package(${_pkg} REQUIRED)
+        if (NOT ${_pkg}_FOUND)
+            find_package(${_pkg} REQUIRED)
+        endif()
 
         # Split targets on '|'
         string(REPLACE "|" ";" _targets_list "${_targets_str}")
