@@ -101,6 +101,91 @@ function(cu__collect_thirdparty_targets IN_LIST_VAR OUT_LIST_VAR)
     set(${OUT_LIST_VAR} "${_thirdparty_targets}" PARENT_SCOPE)
 endfunction()
 
+# Helper: auto-generate config.cmake.in if it doesn't exist
+# For static libraries: includes both public and private deps (all needed for linking)
+# For shared libraries: only includes public deps (for headers/interface)
+# Returns the path to the config.cmake.in file to use (either user-provided or generated)
+function(cu__generate_config_cmake_in OUT_CONFIG_PATH LIBRARY_NAME IS_STATIC IS_SHARED THIRDPARTY_PUBLIC_DEPS_VAR THIRDPARTY_PRIVATE_DEPS_VAR)
+    # Check if user provided one in source dir first
+    set(_source_config_in "${CMAKE_CURRENT_SOURCE_DIR}/cmake/config.cmake.in")
+    if(EXISTS "${_source_config_in}")
+        # Use the user-provided one
+        set(${OUT_CONFIG_PATH} "${_source_config_in}" PARENT_SCOPE)
+        return()
+    endif()
+
+    # Generate in binary dir to avoid polluting source tree
+    set(_config_in_file "${CMAKE_CURRENT_BINARY_DIR}/cmake/config.cmake.in")
+
+    message(STATUS "Generating ${_config_in_file} automatically")
+
+    # Determine if this is a static library
+    set(_is_static FALSE)
+    if(${IS_STATIC} OR (NOT ${IS_SHARED} AND NOT BUILD_SHARED_LIBS))
+        set(_is_static TRUE)
+    endif()
+
+    # Extract unique package names from third-party dependencies
+    set(_packages "")
+
+    if(_is_static)
+        # Static library: collect both public and private deps (all needed for linking)
+        set(_deps_to_process ${${THIRDPARTY_PUBLIC_DEPS_VAR}} ${${THIRDPARTY_PRIVATE_DEPS_VAR}})
+    else()
+        # Shared library: only collect public deps (for headers/interface)
+        set(_deps_to_process ${${THIRDPARTY_PUBLIC_DEPS_VAR}})
+    endif()
+
+    foreach(_arg IN LISTS _deps_to_process)
+        if("${_arg}" STREQUAL "")
+            continue()
+        endif()
+        string(FIND "${_arg}" "+" _plus_idx)
+        if(_plus_idx GREATER -1)
+            string(SUBSTRING "${_arg}" 0 ${_plus_idx} _pkg)
+            string(STRIP "${_pkg}" _pkg)
+            if(NOT "${_pkg}" STREQUAL "")
+                list(APPEND _packages "${_pkg}")
+            endif()
+        endif()
+    endforeach()
+
+    # Generate find_dependency calls
+    set(_find_deps_lines "")
+    if(_packages)
+        list(REMOVE_DUPLICATES _packages)
+        if(_is_static)
+            set(_find_deps_lines "\n# Find dependencies (static library - all deps needed for linking)\ninclude(CMakeFindDependencyMacro)")
+        else()
+            set(_find_deps_lines "\n# Find public dependencies (shared library - for headers)\ninclude(CMakeFindDependencyMacro)")
+        endif()
+        foreach(_pkg IN LISTS _packages)
+            string(APPEND _find_deps_lines "\nif(NOT ${_pkg}_FOUND)\n    find_dependency(${_pkg} REQUIRED)\nendif()")
+        endforeach()
+    endif()
+
+    # Create the directory if needed
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cmake")
+
+    # Generate config.cmake.in
+    file(WRITE "${_config_in_file}"
+"@PACKAGE_INIT@
+
+get_filename_component(@PROJECT_NAME@_CMAKE_DIR \"\${CMAKE_CURRENT_LIST_FILE}\" PATH)
+${_find_deps_lines}
+
+# Include the targets file
+if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
+    include(\"\${@PROJECT_NAME@_CMAKE_DIR}/@PROJECT_NAME@-targets.cmake\")
+endif()
+
+set(@PROJECT_NAME@_LIBRARIES @PROJECT_NAME@::@PROJECT_NAME@)
+")
+
+    # Return the path to the generated config file
+    set(${OUT_CONFIG_PATH} "${_config_in_file}" PARENT_SCOPE)
+endfunction()
+
 macro(cu_add_library LIBRARY_NAME)
     set(options OPTIONAL SHARED STATIC INTERFACE)
     set(oneValueArgs RENAME FOLDER NAMESPACE)
@@ -116,6 +201,7 @@ macro(cu_add_library LIBRARY_NAME)
             RPATH
             THIRDPARTY_PUBLIC_DEPS
             THIRDPARTY_PRIVATE_DEPS
+            TARGET_PROPERTIES
     )
     cmake_parse_arguments(
         cu #prefix
@@ -124,7 +210,6 @@ macro(cu_add_library LIBRARY_NAME)
         "${multiValueArgs}" # multi value arguments
         ${ARGN}
     )
-    
 
     cu__compute_namespace_and_base(${LIBRARY_NAME} "${cu_NAMESPACE}" BASE_NAME NAMESPACE_DIR cu_NAMESPACE)
 #    source_group(${cu_NAMESPACE}\\${BASE_NAME} FILES ${cu_PUBLIC_HEADERS})
@@ -185,8 +270,8 @@ macro(cu_add_library LIBRARY_NAME)
     set_target_properties(${LIBRARY_NAME} PROPERTIES 
         CXX_STANDARD 20
         CXX_STANDARD_REQUIRED TRUE
-        MAP_IMPORTED_CONFIG_RELWITHDEBINFO RELWITHDEBINFO RELEASE MINSIZEREL
-        MAP_IMPORTED_CONFIG_MINSIZEREL MINSIZEREL RELEASE RELWITHDEBINFO
+        MAP_IMPORTED_CONFIG_RELWITHDEBINFO "RELWITHDEBINFO;RELEASE;MINSIZEREL"
+        MAP_IMPORTED_CONFIG_MINSIZEREL "MINSIZEREL;RELEASE;RELWITHDEBINFO"
         DEBUG_POSTFIX _d
         RELWITHDEBINFO_POSTFIX _rd
         MINSIZEREL_POSTFIX _mr
@@ -194,8 +279,12 @@ macro(cu_add_library LIBRARY_NAME)
         # rpath settings
         BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "\$ORIGIN;libs;lib;bin;modules;../libs;../lib;${cu_RPATH}"
-        VERSION ${CMAKE_PROJECT_VERSION}
         )
+
+    # Set VERSION only if CMAKE_PROJECT_VERSION is defined
+    if(CMAKE_PROJECT_VERSION)
+        set_target_properties(${LIBRARY_NAME} PROPERTIES VERSION ${CMAKE_PROJECT_VERSION})
+    endif()
     if (NOT MSVC)
         set_target_properties(${LIBRARY_NAME} PROPERTIES  CUDA_STANDARD 20)
     endif()
@@ -203,6 +292,11 @@ macro(cu_add_library LIBRARY_NAME)
     if (cu_FOLDER)
         message(STATUS "Setting folder to ${cu_FOLDER}")
         set_target_properties(${LIBRARY_NAME} PROPERTIES FOLDER ${cu_FOLDER})
+    endif()
+
+    # Apply user-specified target properties
+    if (cu_TARGET_PROPERTIES)
+        set_target_properties(${LIBRARY_NAME} PROPERTIES ${cu_TARGET_PROPERTIES})
     endif()
     if (BUILD_SHARED_LIBS OR cu_SHARED)
         set_target_properties(${LIBRARY_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -235,8 +329,24 @@ macro(cu_add_library LIBRARY_NAME)
         VERSION ${CMAKE_PROJECT_VERSION}
         COMPATIBILITY SameMajorVersion
     )
-    include(GenerateExportHeader)    
-    configure_file(cmake/config.cmake.in ${LIBRARY_NAME}-config.cmake @ONLY)
+    include(GenerateExportHeader)
+
+    # Auto-generate config.cmake.in if it doesn't exist, get path to use
+    cu__generate_config_cmake_in(
+        _config_in_path
+        ${LIBRARY_NAME}
+        ${cu_STATIC}
+        ${cu_SHARED}
+        cu_THIRDPARTY_PUBLIC_DEPS
+        cu_THIRDPARTY_PRIVATE_DEPS
+    )
+
+    # Configure the package config file
+    configure_package_config_file(
+        ${_config_in_path}
+        ${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}-config.cmake
+        INSTALL_DESTINATION share/${LIBRARY_NAME}
+    )
     include(GNUInstallDirs)
     install(TARGETS ${LIBRARY_NAME} EXPORT ${LIBRARY_NAME}-targets  
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${LIBRARY_NAME}_Development
@@ -249,7 +359,7 @@ macro(cu_add_library LIBRARY_NAME)
             share/${LIBRARY_NAME})
         
     install(EXPORT ${LIBRARY_NAME}-targets NAMESPACE ${cu_NAMESPACE}:: DESTINATION share/${LIBRARY_NAME})
-    
+
     install(DIRECTORY
             include/
         DESTINATION include/${cu_NAMESPACE}/${BASE_NAME})
@@ -279,6 +389,7 @@ macro(cu_add_application APP_NAME)
         THIRDPARTY_PUBLIC_DEPS
         THIRDPARTY_PRIVATE_DEPS
         RPATH
+        TARGET_PROPERTIES
     )
     cmake_parse_arguments(cu "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -333,6 +444,11 @@ macro(cu_add_application APP_NAME)
         set_target_properties(${APP_NAME} PROPERTIES FOLDER ${cu_FOLDER})
     endif()
 
+    # Apply user-specified target properties
+    if (cu_TARGET_PROPERTIES)
+        set_target_properties(${APP_NAME} PROPERTIES ${cu_TARGET_PROPERTIES})
+    endif()
+
     if (cu_PUBLIC_DEFS)
         target_compile_definitions(${APP_NAME} ${LINK_INTERFACE_PUBLIC} ${cu_PUBLIC_DEFS})
     endif()
@@ -374,6 +490,7 @@ macro(cu_add_test TEST_NAME)
         THIRDPARTY_PRIVATE_DEPS
         RPATH
         ARGS
+        TARGET_PROPERTIES
     )
     cmake_parse_arguments(cu "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -428,6 +545,11 @@ macro(cu_add_test TEST_NAME)
     endif()
     if (cu_FOLDER)
         set_target_properties(${TEST_NAME} PROPERTIES FOLDER ${cu_FOLDER})
+    endif()
+
+    # Apply user-specified target properties
+    if (cu_TARGET_PROPERTIES)
+        set_target_properties(${TEST_NAME} PROPERTIES ${cu_TARGET_PROPERTIES})
     endif()
 
     # Register with CTest using gtest_add_tests if crosscompiling, otherwise gtest_discover_tests
