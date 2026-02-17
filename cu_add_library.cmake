@@ -9,6 +9,11 @@
       - cu_add_test(NAME ...)
 ]]
 
+# Set policy for normalized install paths
+if(POLICY CMP0177)
+    cmake_policy(SET CMP0177 NEW)
+endif()
+
 # Helper: compute base name and namespace directory
 function(cu__compute_namespace_and_base IN_NAME IN_NAMESPACE OUT_BASE OUT_NAMESPACE_DIR OUT_EFFECTIVE_NAMESPACE)
     set(_name "${IN_NAME}")
@@ -186,7 +191,7 @@ set(@PROJECT_NAME@_LIBRARIES @PROJECT_NAME@::@PROJECT_NAME@)
     set(${OUT_CONFIG_PATH} "${_config_in_file}" PARENT_SCOPE)
 endfunction()
 
-macro(cu_add_library LIBRARY_NAME)
+function(cu_add_library LIBRARY_NAME)
     set(options OPTIONAL SHARED STATIC INTERFACE)
     set(oneValueArgs RENAME FOLDER NAMESPACE)
     set(multiValueArgs
@@ -204,11 +209,11 @@ macro(cu_add_library LIBRARY_NAME)
             TARGET_PROPERTIES
     )
     cmake_parse_arguments(
+        PARSE_ARGV 1 # Start parsing after LIBRARY_NAME, preserves semicolons
         cu #prefix
         "${options}" #options
         "${oneValueArgs}" # one value arguments
         "${multiValueArgs}" # multi value arguments
-        ${ARGN}
     )
 
     cu__compute_namespace_and_base(${LIBRARY_NAME} "${cu_NAMESPACE}" BASE_NAME NAMESPACE_DIR cu_NAMESPACE)
@@ -371,11 +376,11 @@ macro(cu_add_library LIBRARY_NAME)
             ${CMAKE_CURRENT_BINARY_DIR}/gen/${NAMESPACE_DIR}/${BASE_NAME}/${LIBRARY_NAME}_export.h
             DESTINATION include/${cu_NAMESPACE}/${BASE_NAME}/${NAMESPACE_DIR}/${BASE_NAME})
     endif()
-endmacro()
+endfunction()
 
 
 # Add an application (executable) with similar interface to cu_add_library
-macro(cu_add_application APP_NAME)
+function(cu_add_application APP_NAME)
     set(options OPTIONAL)
     set(oneValueArgs RENAME FOLDER NAMESPACE WORKING_DIRECTORY)
     set(multiValueArgs
@@ -391,7 +396,7 @@ macro(cu_add_application APP_NAME)
         RPATH
         TARGET_PROPERTIES
     )
-    cmake_parse_arguments(cu "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    cmake_parse_arguments(PARSE_ARGV 1 cu "${options}" "${oneValueArgs}" "${multiValueArgs}")
 
     cu__compute_namespace_and_base(${APP_NAME} "${cu_NAMESPACE}" BASE_NAME NAMESPACE_DIR cu_NAMESPACE)
 
@@ -471,11 +476,11 @@ macro(cu_add_application APP_NAME)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ${APP_NAME}_RunTime
         BUNDLE  DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT ${APP_NAME}_RunTime
     )
-endmacro()
+endfunction()
 
 
 # Add a test executable and register it with CTest
-macro(cu_add_test TEST_NAME)
+function(cu_add_test TEST_NAME)
     set(options OPTIONAL)
     set(oneValueArgs RENAME FOLDER NAMESPACE WORKING_DIRECTORY)
     set(multiValueArgs
@@ -492,7 +497,7 @@ macro(cu_add_test TEST_NAME)
         ARGS
         TARGET_PROPERTIES
     )
-    cmake_parse_arguments(cu "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    cmake_parse_arguments(PARSE_ARGV 1 cu "${options}" "${oneValueArgs}" "${multiValueArgs}")
 
     cu__compute_namespace_and_base(${TEST_NAME} "${cu_NAMESPACE}" BASE_NAME NAMESPACE_DIR cu_NAMESPACE)
 
@@ -569,4 +574,4 @@ macro(cu_add_test TEST_NAME)
             PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${_test_working_dir}"
         )
     endif()
-endmacro()
+endfunction()
